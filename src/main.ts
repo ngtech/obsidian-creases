@@ -218,7 +218,7 @@ export default class CreasesPlugin extends Plugin {
     const { view, newSelections, oldSelections } = evt;
     if (!view.editor) return;
 
-    const foldPositions: FoldRange[] = [];
+    const newFoldPositions: FoldRange[] = [];
     const changes: EditorChange[] = [];
 
     for (let idx = 0; idx < newSelections.length; idx++) {
@@ -238,7 +238,7 @@ export default class CreasesPlugin extends Plugin {
       for (let lineNum = start.line; lineNum <= end.line; lineNum++) {
         const line = view.editor.getLine(lineNum);
         if (hasCrease(line)) {
-          foldPositions.push({
+          newFoldPositions.push({
             from: lineNum,
             to: lineNum + 1,
           });
@@ -255,11 +255,25 @@ export default class CreasesPlugin extends Plugin {
       }
     }
 
-    view.editMode.applyFoldInfo({
-      folds: foldPositions,
-      lines: view.editor.lineCount(),
-    });
-    view.editor.transaction({ changes });
+    // Only touch fold state when the inserted template actually introduced
+    // creases. Otherwise calling applyFoldInfo with the (possibly empty) set
+    // of inserted-range folds would clobber every other fold in the document
+    // — most visibly, folds above the insertion point would spring open.
+    if (newFoldPositions.length > 0) {
+      const existingFolds = view.editMode.getFoldInfo()?.folds ?? [];
+      const foldsByLine = new Map<number, FoldRange>();
+      for (const fold of existingFolds) foldsByLine.set(fold.from, fold);
+      for (const fold of newFoldPositions) foldsByLine.set(fold.from, fold);
+
+      view.editMode.applyFoldInfo({
+        folds: Array.from(foldsByLine.values()),
+        lines: view.editor.lineCount(),
+      });
+    }
+
+    if (changes.length > 0) {
+      view.editor.transaction({ changes });
+    }
   }
 
   decreaseHeadingFoldLevel(ctx: MarkdownViewController) {
